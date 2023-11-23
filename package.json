@@ -1,0 +1,32 @@
+{
+  "name": "ezCard",
+  "version": "1.0.0",
+  "description": "",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Rashid Siraj @Grepsoft 2023",
+  "license": "ISC",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.32.0",
+    "@aws-sdk/s3-request-presigner": "^3.326.0",
+    "axios": "^0.21.1",
+    "bcrypt": "^5.0.1",
+    "cors": "^2.8.5",
+    "dotenv": "^8.2.0",
+    "express": "^4.17.1",
+    "jsonwebtoken": "^8.5.1",
+    "log4js": "^6.3.0",
+    "mongodb": "5.7",
+    "mongoose": "^7.3.4",
+    "multer": "^1.4.3",
+    "multer-s3": "^3.0.1",
+    "sharp": "^0.32.0",
+    "simple-node-logger": "^21.8.12"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.15"
+  },
+  "proxy": "http://localhost:30000"
+}
