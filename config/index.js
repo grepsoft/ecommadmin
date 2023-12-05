@@ -9,6 +9,13 @@ module.exports = {
 
   apibasepath: process.env.BASE_PATH,
 
+  // wit
+  wit: {
+    app_id: process.env.WIT_APP_ID,
+    server_access_token: process.env.WIT_SERVER_ACCESS_TOKEN,
+    client_access_token: process.env.WIT_CLIENT_ACCESS_TOKEN
+  },
+
   // database
   database: {
     options: {

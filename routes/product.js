@@ -4,6 +4,7 @@ const s3Commands = require("../s3Helper");
 const multer = require('multer');
 const fs = require('fs');
 const sharp = require('sharp');
+const url = require('url');
 
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
@@ -61,7 +62,7 @@ module.exports = (config) => {
 
                 await sharp(filePath)
                     .rotate() // Rotate the image based on orientation metadata
-                    .resize(200, 200)
+                    .resize(400, 400)
                     .toBuffer()
                     .then(buffer => {
                         return s3Commands.addObject('thumbnail_' + req.file.filename, buffer);
@@ -71,8 +72,8 @@ module.exports = (config) => {
             const newProduct = await Product.create(
                 {
                     ...product,
-                    photo: req.file && req.file.filename || '',
-                    thumb: req.file && 'thumbnail_' + req.file.filename || ''
+                    photo: req.file && s3Commands.getObjectUrl(req.file.filename) || '',
+                    thumb: req.file && s3Commands.getObjectUrl('thumbnail_' + req.file.filename) || ''
                 });
 
             res.send({
@@ -109,14 +110,31 @@ module.exports = (config) => {
                         return s3Commands.addObject('thumbnail_' + req.file.filename, buffer);
                     }).catch(err => console.log('sharp 2: ' + err));
             }
-            const updatedProduct = await Product.findOneAndUpdate({ _id: product._id }, {
-                ...product,
-                photo: req.file && req.file.filename || '',
-                thumb: req.file && 'thumbnail_' + req.file.filename || ''
-            }, { new: true });
+
+            // find product
+            const existingProduct = await Product.findById(product._id);
+
+            if (existingProduct) {
+                existingProduct.name = product.name;
+                existingProduct.color = product.color;
+                existingProduct.description = product.description;
+                existingProduct.category = product.category;
+                existingProduct.quantity = product.quantity;
+                existingProduct.price = product.price;
+                existingProduct.photo = req.file && s3Commands.getObjectUrl(req.file.filename) || existingProduct.photo;
+                existingProduct.thumb = req.file && s3Commands.getObjectUrl('thumbnail_' + req.file.filename) || existingProduct.thumb;
+
+                await existingProduct.save()
+            }
+            // const updatedProduct = await Product.findOneAndUpdate({ _id: product._id }, {
+            //     ...product,
+            //     photo: req.file && req.file.filename || '',
+            //     thumb: req.file && 'thumbnail_' + req.file.filename || ''
+            // }, { new: true });
+
             res.send({
                 message: "Product updated",
-                data: updatedProduct
+                data: existingProduct
             });
 
         } catch (error) {
@@ -135,32 +153,36 @@ module.exports = (config) => {
         const limit = req.params.limit;
 
         try {
+            const total = await Product.find({});
+
             const products = await Product.aggregate([
                 {
                     $skip: +from,
-                }, {
+                },
+                {
                     $limit: +limit,
-                }]);
-
-            await Promise.all(products.map(async product => {
-
-                if (product.photo) {
-                    product.photourl = await s3Commands.getSignedUrl(product.photo);
+                },
+                {
+                    $project: {
+                        name: 1,
+                        price: 1,
+                        description: 1,
+                        stock: 1,
+                        photo: 1,
+                        thumb: 1,
+                        quantity: 1,
+                    }
                 }
+            ]);
 
-                if (product.thumb) {
-                    product.thumburl = await s3Commands.getSignedUrl(product.thumb);
-                }
-
-                return product;
-            })).then(result => {
-                res.send({
-                    message: "Product found",
-                    data: result
-                });
+            res.send({
+                message: "Product found",
+                data: products,
+                total: total.length
             });
 
         } catch (error) {
+            console.log(error)
             res.status(400).send({
                 message: "Failed to find products",
                 error: error,
@@ -175,12 +197,6 @@ module.exports = (config) => {
 
         try {
             const products = await Product.find({});
-            if (products.length > 0) {
-                products.map(p => {
-                    p.photo = p.photo ? s3Commands.getObjectUrl(p.photo) : '';
-                    p.thumb = p.thumb ? s3Commands.getObjectUrl(p.thumb) : '';
-                });
-            }
             res.send({
                 message: "Product found",
                 data: products
@@ -202,10 +218,6 @@ module.exports = (config) => {
         try {
             const product = await Product.findOne({ _id: id });
 
-            if (product) {
-                product.photo = product.photo ? s3Commands.getObjectUrl(product.photo) : '';
-                product.thumb = product.thumb ? s3Commands.getObjectUrl(product.thumb) : '';
-            }
             res.send({
                 message: "Product found",
                 data: product,
@@ -223,7 +235,7 @@ module.exports = (config) => {
     /**
      * Delete a product
      */
-    router.delete("/:id", async (req, res) => {
+    router.delete("/single/:id", async (req, res) => {
         const id = req.params.id;
         try {
             // first find the product
@@ -231,8 +243,22 @@ module.exports = (config) => {
 
             // delete the images
             if (product) {
-                await s3Commands.deleteObject(product.thumb);
-                await s3Commands.deleteObject(product.photo);
+                const parsedThumbUrl = new URL(product.thumb);
+                const parsedPhotoUrl = new URL(product.photo);
+
+                // Access the pathname property to get the path part
+                const thumbName = parsedThumbUrl.pathname;
+                const photoName = parsedPhotoUrl.pathname;
+
+                // Split the path by '/' and get the last part
+                const thumbPathParts = thumbName.split('/');
+                const photoPathParts = photoName.split('/');
+
+                const thumb = thumbPathParts[thumbPathParts.length - 1];
+                const photo = photoPathParts[photoPathParts.length - 1];
+
+                await s3Commands.deleteObject(thumb);
+                await s3Commands.deleteObject(photo);
             }
             await Product.deleteOne({
                 _id: id
@@ -249,8 +275,53 @@ module.exports = (config) => {
                 error: error,
             });
         }
-
     });
 
+    /**
+    * Bulk Delete products
+    */
+    router.delete("/bulk", async (req, res) => {
+        const products = req.body || [];
+
+        if (products) {
+
+            products.forEach(async id => {
+                const product = await Product.findOne({ _id: id });
+
+                // delete the images
+                if (product) {
+                    const parsedThumbUrl = new URL(product.thumb);
+                    const parsedPhotoUrl = new URL(product.photo);
+
+                    // Access the pathname property to get the path part
+                    const thumbName = parsedThumbUrl.pathname;
+                    const photoName = parsedPhotoUrl.pathname;
+
+                    // Split the path by '/' and get the last part
+                    const thumbPathParts = thumbName.split('/');
+                    const photoPathParts = photoName.split('/');
+
+                    const thumb = thumbPathParts[thumbPathParts.length - 1];
+                    const photo = photoPathParts[photoPathParts.length - 1];
+
+                    await s3Commands.deleteObject(product.thumb);
+                    await s3Commands.deleteObject(product.photo);
+                }
+
+                await Product.deleteOne({
+                    _id: id
+                });
+            });
+
+            res.status(200).json({
+                message: "Products deleted"
+            })
+        } else {
+            res.status(200).json({
+                message: "Nothing to delete"
+            })
+        }
+
+    })
     return router;
 };

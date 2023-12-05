@@ -41,7 +41,6 @@ const s3Commands = {
           return s3Client.send(deleteCommand);
     },
     getObjectUrl: (object) => {
-        // https://[BUCKET].s3.[REGION].amazonaws.com/[OBJECT]
         return `https://${process.env.BUCKETNAME}.s3.${process.env.REGION}.amazonaws.com/${object}`;
     }
 }
